@@ -8,7 +8,8 @@ use minhook::MinHook;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Globalization::{CP_ACP, MultiByteToWideChar};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
-use windows_sys::Win32::Storage::FileSystem::CREATEFILE2_EXTENDED_PARAMETERS;
+use windows_sys::Win32::Foundation::BOOL;
+use windows_sys::Win32::Storage::FileSystem::{CREATEFILE2_EXTENDED_PARAMETERS, WIN32_FIND_DATAW};
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
 
 use crate::paths::{Guard, find_game_root, normalize, wide_len};
@@ -25,6 +26,17 @@ type CreateFile2Fn =
 static ORIG_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 static ORIG_A: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 static ORIG_2: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+static ORIG_ATTR_EX_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+static ORIG_ATTR_EX_A: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+static ORIG_ATTR_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+static ORIG_ATTR_A: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+static ORIG_FIND_EX_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+
+type AttrExWFn = unsafe extern "system" fn(*const u16, i32, *mut c_void) -> BOOL;
+type AttrExAFn = unsafe extern "system" fn(*const u8, i32, *mut c_void) -> BOOL;
+type AttrWFn = unsafe extern "system" fn(*const u16) -> u32;
+type AttrAFn = unsafe extern "system" fn(*const u8) -> u32;
+type FindExWFn = unsafe extern "system" fn(*const u16, i32, *mut WIN32_FIND_DATAW, i32, *const c_void, u32) -> HANDLE;
 static INSTALL_LOCK: Mutex<()> = Mutex::new(());
 
 const GENERIC_WRITE: u32 = 0x4000_0000;
@@ -194,6 +206,127 @@ unsafe extern "system" fn detour_2(
     unsafe { orig(name, access, share, disposition, params) }
 }
 
+/// Metadata queries (size, attributes, find) for a redirected file must
+/// describe the replacement, or the game sizes its reads from the stock file.
+/// Must be called with a `Guard` held.
+fn decide_meta(path: &[u16]) -> Option<Vec<u16>> {
+    let root = ROOT.get()?;
+    let norm = normalize(path)?;
+    let rel = root.relative(&norm)?;
+    if !rel.starts_with("bundle/") {
+        return None;
+    }
+    let replacement = state::peek(rel)?;
+    trace::record(|| format!("meta {rel}"));
+    Some(replacement)
+}
+
+fn meta_wide(path: *const u16) -> Option<Vec<u16>> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let len = unsafe { wide_len(path) }?;
+        let slice = unsafe { std::slice::from_raw_parts(path, len) };
+        if slice.iter().any(|&c| c == '*' as u16 || c == '?' as u16) {
+            return None;
+        }
+        decide_meta(slice)
+    }))
+    .ok()
+    .flatten()
+}
+
+fn meta_ansi(path: *const u8) -> Option<Vec<u16>> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let wide = ansi_to_wide(path)?;
+        decide_meta(&wide[..wide.len() - 1])
+    }))
+    .ok()
+    .flatten()
+}
+
+unsafe extern "system" fn detour_attr_ex_w(name: *const u16, level: i32, info: *mut c_void) -> BOOL {
+    let orig: AttrExWFn = unsafe { std::mem::transmute(ORIG_ATTR_EX_W.load(Ordering::Acquire)) };
+    let Some(_guard) = Guard::enter() else {
+        return unsafe { orig(name, level, info) };
+    };
+    match meta_wide(name) {
+        Some(replacement) => unsafe { orig(replacement.as_ptr(), level, info) },
+        None => unsafe { orig(name, level, info) },
+    }
+}
+
+unsafe extern "system" fn detour_attr_ex_a(name: *const u8, level: i32, info: *mut c_void) -> BOOL {
+    let orig: AttrExAFn = unsafe { std::mem::transmute(ORIG_ATTR_EX_A.load(Ordering::Acquire)) };
+    let Some(_guard) = Guard::enter() else {
+        return unsafe { orig(name, level, info) };
+    };
+    match meta_ansi(name) {
+        Some(replacement) => {
+            let orig_w: AttrExWFn = unsafe { std::mem::transmute(ORIG_ATTR_EX_W.load(Ordering::Acquire)) };
+            unsafe { orig_w(replacement.as_ptr(), level, info) }
+        }
+        None => unsafe { orig(name, level, info) },
+    }
+}
+
+unsafe extern "system" fn detour_attr_w(name: *const u16) -> u32 {
+    let orig: AttrWFn = unsafe { std::mem::transmute(ORIG_ATTR_W.load(Ordering::Acquire)) };
+    let Some(_guard) = Guard::enter() else {
+        return unsafe { orig(name) };
+    };
+    match meta_wide(name) {
+        Some(replacement) => unsafe { orig(replacement.as_ptr()) },
+        None => unsafe { orig(name) },
+    }
+}
+
+unsafe extern "system" fn detour_attr_a(name: *const u8) -> u32 {
+    let orig: AttrAFn = unsafe { std::mem::transmute(ORIG_ATTR_A.load(Ordering::Acquire)) };
+    let Some(_guard) = Guard::enter() else {
+        return unsafe { orig(name) };
+    };
+    match meta_ansi(name) {
+        Some(replacement) => {
+            let orig_w: AttrWFn = unsafe { std::mem::transmute(ORIG_ATTR_W.load(Ordering::Acquire)) };
+            unsafe { orig_w(replacement.as_ptr()) }
+        }
+        None => unsafe { orig(name) },
+    }
+}
+
+unsafe extern "system" fn detour_find_ex_w(
+    name: *const u16,
+    level: i32,
+    data: *mut WIN32_FIND_DATAW,
+    op: i32,
+    filter: *const c_void,
+    flags: u32,
+) -> HANDLE {
+    let orig: FindExWFn = unsafe { std::mem::transmute(ORIG_FIND_EX_W.load(Ordering::Acquire)) };
+    let Some(_guard) = Guard::enter() else {
+        return unsafe { orig(name, level, data, op, filter, flags) };
+    };
+    let Some(replacement) = meta_wide(name) else {
+        return unsafe { orig(name, level, data, op, filter, flags) };
+    };
+    let handle = unsafe { orig(replacement.as_ptr(), level, data, op, filter, flags) };
+    if handle != INVALID_HANDLE_VALUE && !data.is_null() {
+        // Report the requested file name, not the replacement's.
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let len = unsafe { wide_len(name) }.unwrap_or(0);
+            let full = unsafe { std::slice::from_raw_parts(name, len) };
+            let start = full.iter().rposition(|&c| c == '\\' as u16 || c == '/' as u16).map_or(0, |i| i + 1);
+            let leaf = &full[start..];
+            let out = unsafe { &mut (*data).cFileName };
+            if leaf.len() < out.len() {
+                out.fill(0);
+                out[..leaf.len()].copy_from_slice(leaf);
+                unsafe { (*data).cAlternateFileName.fill(0) };
+            }
+        }));
+    }
+    handle
+}
+
 fn hook(proc_name: &str, detour: *mut c_void, slot: &AtomicPtr<c_void>) -> Result<*mut c_void, String> {
     let mut last = String::new();
     for module in ["kernelbase.dll", "kernel32.dll"] {
@@ -242,6 +375,11 @@ pub fn install() -> Result<(), String> {
             ("CreateFileW", detour_w as *mut c_void, &ORIG_W),
             ("CreateFileA", detour_a as *mut c_void, &ORIG_A),
             ("CreateFile2", detour_2 as *mut c_void, &ORIG_2),
+            ("GetFileAttributesExW", detour_attr_ex_w as *mut c_void, &ORIG_ATTR_EX_W),
+            ("GetFileAttributesExA", detour_attr_ex_a as *mut c_void, &ORIG_ATTR_EX_A),
+            ("GetFileAttributesW", detour_attr_w as *mut c_void, &ORIG_ATTR_W),
+            ("GetFileAttributesA", detour_attr_a as *mut c_void, &ORIG_ATTR_A),
+            ("FindFirstFileExW", detour_find_ex_w as *mut c_void, &ORIG_FIND_EX_W),
         ] {
             hook(proc_name, detour, slot)?;
         }

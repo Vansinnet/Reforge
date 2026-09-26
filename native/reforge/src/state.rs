@@ -149,6 +149,11 @@ pub fn add(stock: &str, replacement: &str, sha256: Option<&str>, is_virtual: boo
         if actual != want {
             return Err(format!("{stock} has changed (sha256 {actual}, expected {want})"));
         }
+        if in_use(&stock_path) {
+            return Err(format!(
+                "{stock} is already open in the game (it loaded before Reforge started), so it stays stock"
+            ));
+        }
         expected = Some(want);
     }
 
@@ -182,6 +187,27 @@ pub fn clear() -> usize {
     let n = entries.len();
     entries.clear();
     n
+}
+
+/// The replacement path for `rel` without counting a serve (metadata queries).
+pub fn peek(rel: &str) -> Option<Vec<u16>> {
+    if !enabled() {
+        return None;
+    }
+    let entries = ENTRIES.read().unwrap_or_else(|e| e.into_inner());
+    entries.get(rel).map(|entry| entry.replacement_wide.clone())
+}
+
+/// True when some handle in this process (the game's) already has the file
+/// open. Serving a replacement for a file the game is already reading would
+/// mix two files' bytes, so such files are refused.
+fn in_use(path: &Path) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    bypass(|| match std::fs::OpenOptions::new().read(true).share_mode(0).open(path) {
+        Ok(_) => false,
+        Err(e) => e.raw_os_error() == Some(ERROR_SHARING_VIOLATION),
+    })
 }
 
 /// The replacement for `rel`, if one is registered and redirects are on.

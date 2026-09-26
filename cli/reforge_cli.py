@@ -495,7 +495,7 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("mod")
     s.add_argument("--game", help="Darktide folder; its binaries/oo2core_9_win64.dll is used")
     s.add_argument("--oodle", help="explicit path to oo2core_9_win64.dll")
-    s.add_argument("--level", type=int, default=bundle8.LEVEL_NORMAL, help="Oodle level (default 4, Normal)")
+    s.add_argument("--level", type=int, default=bundle8.LEVEL_OPTIMAL2, help="Oodle level (default 6, Optimal2, as the game uses)")
     s.set_defaults(func=cmd_pack)
 
     s = sub.add_parser("verify", help="check that stock files still match after a game update")

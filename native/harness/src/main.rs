@@ -15,7 +15,9 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{CloseHandle, FreeLibrary, HANDLE, HMODULE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFile2, CreateFileA, CreateFileW, FILE_ATTRIBUTE_NORMAL, GetShortPathNameW, FILE_SHARE_READ, OPEN_EXISTING, ReadFile,
+    CreateFile2, CreateFileA, CreateFileW, FILE_ATTRIBUTE_NORMAL, FindClose, FindFirstFileW, GetFileAttributesA,
+    GetFileAttributesExA, GetFileAttributesExW, GetFileAttributesW, GetFileExInfoStandard, GetShortPathNameW,
+    INVALID_FILE_ATTRIBUTES, WIN32_FILE_ATTRIBUTE_DATA, WIN32_FIND_DATAW, FILE_SHARE_READ, OPEN_EXISTING, ReadFile,
 };
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
@@ -317,6 +319,26 @@ fn main() {
     t.check("CreateFileA redirected", v == b"MOD-A", &v);
     let v = read_2(abs.to_str().unwrap());
     t.check("CreateFile2 redirected", v == b"MOD-A", &v);
+    let mut info: WIN32_FILE_ATTRIBUTE_DATA = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileAttributesExW(wide("..\\bundle\\aaaa1111").as_ptr(), GetFileExInfoStandard, &mut info as *mut _ as *mut _) };
+    t.check("GetFileAttributesExW reports replacement size", ok != 0 && info.nFileSizeLow == 5, info.nFileSizeLow);
+    let mut info_a: WIN32_FILE_ATTRIBUTE_DATA = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileAttributesExA(c("..\\bundle\\aaaa1111").as_ptr() as *const u8, GetFileExInfoStandard, &mut info_a as *mut _ as *mut _) };
+    t.check("GetFileAttributesExA reports replacement size", ok != 0 && info_a.nFileSizeLow == 5, info_a.nFileSizeLow);
+    let len = fs::metadata("../bundle/aaaa1111").map(|m| m.len()).unwrap_or(0);
+    t.check("std metadata reports replacement size", len == 5, len);
+    let mut find: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
+    let h = unsafe { FindFirstFileW(wide("..\\bundle\\aaaa1111").as_ptr(), &mut find) };
+    let fname = String::from_utf16_lossy(&find.cFileName[..find.cFileName.iter().position(|&c| c == 0).unwrap_or(0)]);
+    t.check("FindFirstFileW reports replacement size under the stock name", h != INVALID_HANDLE_VALUE && find.nFileSizeLow == 5 && fname == "aaaa1111", (&fname, find.nFileSizeLow));
+    if h != INVALID_HANDLE_VALUE { unsafe { FindClose(h) }; }
+    let mut find: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
+    let h = unsafe { FindFirstFileW(wide("..\\bundle\\*").as_ptr(), &mut find) };
+    t.check("wildcard find is untouched", h != INVALID_HANDLE_VALUE, ());
+    if h != INVALID_HANDLE_VALUE { unsafe { FindClose(h) }; }
+    let mut info: WIN32_FILE_ATTRIBUTE_DATA = unsafe { std::mem::zeroed() };
+    unsafe { GetFileAttributesExW(wide("..\\bundle\\bbbb2222").as_ptr(), GetFileExInfoStandard, &mut info as *mut _ as *mut _) };
+    t.check("unregistered file keeps stock size", info.nFileSizeLow == 7, info.nFileSizeLow);
     let v = read_std_rw("../bundle/aaaa1111");
     t.check("read-write open left on stock", v == b"STOCK-A", &v);
     let v = read_std("settings.ini");
@@ -363,6 +385,10 @@ fn main() {
     t.check("add nested virtual file", r.is_ok(), &r);
     let v = read_std("../bundle/data/mymod/dddd4444");
     t.check("nested virtual file served without a real folder", v == b"NEW", &v);
+    let attrs = unsafe { GetFileAttributesW(wide("..\\bundle\\data\\mymod\\dddd4444").as_ptr()) };
+    t.check("GetFileAttributesW sees a virtual file", attrs != INVALID_FILE_ATTRIBUTES, attrs);
+    let attrs = unsafe { GetFileAttributesA(c("..\\bundle\\data\\mymod\\dddd4444").as_ptr() as *const u8) };
+    t.check("GetFileAttributesA sees a virtual file", attrs != INVALID_FILE_ATTRIBUTES, attrs);
     let r = lib.add_new("bundle/aaaa1111", "mods/alpha/payload/new.bin");
     t.check("virtual refuses existing stock", r.as_ref().is_err_and(|e| e.contains("exists")), &r);
 
@@ -373,6 +399,10 @@ fn main() {
     let v = read_std("../bundle/aaaa1111");
     t.check("re-enabled serves replacement", v == b"MOD-A", &v);
 
+    let held = fs::File::open("../bundle/bbbb2222").unwrap();
+    let r = lib.add("bundle/bbbb2222", "mods/alpha/payload/b.bin", &sha_b);
+    t.check("file the game holds open is refused", r.as_ref().is_err_and(|e| e.contains("already open")), &r);
+    drop(held);
     let r = lib.add("bundle/bbbb2222", "mods/alpha/payload/b.bin", &sha_b);
     t.check("add second file", r.is_ok(), &r);
     fs::remove_file(game.join("mods/alpha/payload/b.bin")).unwrap();

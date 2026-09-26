@@ -21,7 +21,7 @@ BEGIN
             VALUE "OriginalFilename", "reforge.dll"
             VALUE "ProductName", "Reforge"
             VALUE "ProductVersion", REFORGE_VERSION_STR
-            VALUE "Comments", "Serves read-only opens of game bundle files from files inside the game's mods folder. Hooks CreateFileW/CreateFileA/CreateFile2 in this process only. No network, no writes, no game memory patching beyond the three hooks."
+            VALUE "Comments", "Serves read-only opens of game bundle files from files inside the game's mods folder. Hooks CreateFileW/A, CreateFile2, GetFileAttributes(Ex)W/A and FindFirstFileExW in this process only. No network, no writes, no other memory patching."
         END
     END
     BLOCK "VarFileInfo"

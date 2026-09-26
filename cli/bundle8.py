@@ -22,6 +22,7 @@ MAGIC = bytes.fromhex("080000f003000000")
 CHUNK = 0x80000
 KRAKEN = 8
 LEVEL_NORMAL = 4
+LEVEL_OPTIMAL2 = 6  # what the game uses for its own bundles
 MAX_CHUNKS = 4096
 MAX_INDEX = 65536
 
@@ -139,7 +140,7 @@ class Oodle:
             ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int,
         ]
 
-    def compress(self, raw: bytes, level: int = LEVEL_NORMAL) -> bytes:
+    def compress(self, raw: bytes, level: int = LEVEL_OPTIMAL2) -> bytes:
         src = ctypes.create_string_buffer(raw, len(raw))
         cap = len(raw) + 0x10000
         dst = ctypes.create_string_buffer(cap)
@@ -156,7 +157,7 @@ class Oodle:
         return dst.raw[:n]
 
 
-def pack(data: bytes, oodle, level: int = LEVEL_NORMAL) -> bytes:
+def pack(data: bytes, oodle, level: int = LEVEL_OPTIMAL2) -> bytes:
     """Compress every stored chunk; compressed chunks stay byte-identical.
 
     Every new chunk is decompressed again and compared with the original
