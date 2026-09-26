@@ -333,7 +333,7 @@ fn main() {
     t.check("FindFirstFileW reports replacement size under the stock name", h != INVALID_HANDLE_VALUE && find.nFileSizeLow == 5 && fname == "aaaa1111", (&fname, find.nFileSizeLow));
     if h != INVALID_HANDLE_VALUE { unsafe { FindClose(h) }; }
     let mut find: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
-    let h = unsafe { FindFirstFileExW(wide("..\\bundle\\aaaa1111").as_ptr(), 0, &mut find, 0, null(), 0) };
+    let h = unsafe { FindFirstFileExW(wide("..\\bundle\\aaaa1111").as_ptr(), 0, &mut find as *mut _ as *mut _, 0, null(), 0) };
     let fname = String::from_utf16_lossy(&find.cFileName[..find.cFileName.iter().position(|&c| c == 0).unwrap_or(0)]);
     t.check("FindFirstFileExW reports replacement size under the stock name", h != INVALID_HANDLE_VALUE && find.nFileSizeLow == 5 && fname == "aaaa1111", (&fname, find.nFileSizeLow));
     if h != INVALID_HANDLE_VALUE { unsafe { FindClose(h) }; }
