@@ -340,6 +340,11 @@ local function resolve(stock)
 	local file = instance.files[stock]
 	local native = instance.native
 	local skip = {}
+
+	if not native then
+		return
+	end
+
 	local opened = native.Reforge_Opens(stock) > 0
 
 	if opened and file.loaded == nil then
