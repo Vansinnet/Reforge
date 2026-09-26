@@ -355,6 +355,32 @@ def stored_problems(root: Path, entries: list[dict]) -> list[str]:
     return problems
 
 
+def size_warnings(root: Path, entries: list[dict], game: Path) -> list[str]:
+    warnings = []
+    for entry, path in bundle_payloads(root, entries):
+        if entry.get("virtual"):
+            continue
+        stock = game.joinpath(*entry["stock"].split("/"))
+        if not stock.is_file():
+            continue
+        try:
+            problems = bundle8.fits_stock(path.read_bytes(), stock.read_bytes())
+        except bundle8.BundleError as exc:
+            problems = [str(exc)]
+        if problems:
+            warnings.append(f"{entry['file']}: " + "; ".join(problems))
+    return warnings
+
+
+def print_size_warnings(warnings: list[str]) -> None:
+    if warnings:
+        print("warning: replacement bundles larger than the stock file crash Darktide if the game loads them "
+              "through DirectStorage before mods start (for example the menu character's weapons). "
+              "Bundles first loaded in missions were not affected. Keep these within the stock size where possible:")
+        for line in warnings:
+            print("  " + line)
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     root, name = find_mod(args.mod)
     data = load_source(root)
@@ -366,9 +392,11 @@ def cmd_build(args: argparse.Namespace) -> int:
             "(\"Failed to decompress ... from package\"). Run `reforge pack` first:\n  " + "\n  ".join(problems)
         )
     if args.game:
-        failures = verify_entries(find_game(args.game), entries)
+        game = find_game(args.game)
+        failures = verify_entries(game, entries)
         if failures:
             raise ToolError("stock files differ from reforge.json:\n  " + "\n  ".join(failures))
+        print_size_warnings(size_warnings(root, entries, game))
     path = write_manifest(root, name, entries)
     sync_runtime(root, name)
     virtual = sum(1 for e in entries if e.get("virtual"))
@@ -403,14 +431,19 @@ def cmd_pack(args: argparse.Namespace) -> int:
     if not targets:
         print("No bundle payload has uncompressed chunks")
         return 0
-    dll = Path(args.oodle) if args.oodle else find_game(args.game) / "binaries" / "oo2core_9_win64.dll"
+    game = find_game(args.game) if (args.game or not args.oodle) else None
+    dll = Path(args.oodle) if args.oodle else game / "binaries" / "oo2core_9_win64.dll"
     if not dll.is_file():
         raise ToolError(f"Oodle library not found: {dll}")
     try:
         oodle = bundle8.Oodle(dll)
         for entry, path in targets:
             before = path.read_bytes()
-            after = bundle8.pack(before, oodle, args.level)
+            fit = None
+            stock = game.joinpath(*entry["stock"].split("/")) if game and not entry.get("virtual") else None
+            if stock is not None and stock.is_file():
+                fit = bundle8.parse(stock.read_bytes()).sizes
+            after = bundle8.pack(before, oodle, args.level, fit)
             tmp = path.with_name(path.name + ".reforge-pack.tmp")
             tmp.write_bytes(after)
             os.replace(tmp, path)
@@ -427,6 +460,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     failures = verify_entries(game, entries)
     for failure in failures:
         print(failure)
+    if not failures:
+        print_size_warnings(size_warnings(root, entries, game))
     print(f"{len(entries) - len(failures)} of {len(entries)} redirects match {game}")
     return 1 if failures else 0
 

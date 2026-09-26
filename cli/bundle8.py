@@ -157,7 +157,30 @@ class Oodle:
         return dst.raw[:n]
 
 
-def pack(data: bytes, oodle, level: int = LEVEL_OPTIMAL2) -> bytes:
+def fits_stock(data: bytes, stock: bytes) -> list[str]:
+    """Reasons a replacement bundle may not load early; empty when it fits.
+
+    Observed in game (2026-09-26): when Darktide loads a bundle through its
+    DirectStorage reader early (for example the menu character's weapon
+    effects), it reads with the stock file's size, known from before any mod
+    runs. A replacement larger than the stock bundle is cut off and the game
+    crashes with "Failed to decompress". Same-size or smaller replacements
+    load. Bundles first loaded later (missions) were not affected.
+    """
+    problems = []
+    mine, theirs = parse(data), parse(stock)
+    if len(data) > len(stock):
+        problems.append(f"{len(data):,} bytes, stock {len(stock):,}")
+    if len(mine.sizes) != len(theirs.sizes):
+        problems.append(f"{len(mine.sizes)} chunks, stock {len(theirs.sizes)}")
+    else:
+        over = [i for i, (a, b) in enumerate(zip(mine.sizes, theirs.sizes)) if a > b]
+        if over:
+            problems.append(f"chunk(s) {over[:5]} larger than stock")
+    return problems
+
+
+def pack(data: bytes, oodle, level: int = LEVEL_OPTIMAL2, fit: list[int] | None = None) -> bytes:
     """Compress every stored chunk; compressed chunks stay byte-identical.
 
     Every new chunk is decompressed again and compared with the original
@@ -165,11 +188,19 @@ def pack(data: bytes, oodle, level: int = LEVEL_OPTIMAL2) -> bytes:
     """
     layout = parse(data)
     blocks = []
-    for block in layout.blocks:
+    for i, block in enumerate(layout.blocks):
         if len(block) != CHUNK:
             blocks.append(block)
             continue
         packed = oodle.compress(block, level)
+        # Try stronger levels when the chunk must fit a stock chunk size.
+        if fit is not None and i < len(fit) and len(packed) > fit[i]:
+            for stronger in (8, 9):
+                candidate = oodle.compress(block, stronger)
+                if len(candidate) < len(packed):
+                    packed = candidate
+                if len(packed) <= fit[i]:
+                    break
         _require(len(packed) < CHUNK, "chunk did not compress below 512 KiB")
         _require(oodle.decompress(packed) == block, "Oodle round trip differs")
         blocks.append(packed)

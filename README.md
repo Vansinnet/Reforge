@@ -92,6 +92,15 @@ writes a file trace to the log.
 - Files the game opened before `reforge.dll` was installed cannot be detected
   after the fact. Most effect and material bundles load with missions, after
   mods load. A file loaded at boot needs a restart to be picked up.
+- **Keep replacement bundles within the stock size.** Darktide learns each
+  bundle's size before any mod runs. When it loads a bundle early through
+  its DirectStorage reader (for example the weapons of the character in the
+  menu), it reads only the stock size. A larger replacement is cut off, and
+  the game crashes with "Failed to decompress ... from package". This was
+  observed in game on 2026-09-26. Same-size or smaller replacements load
+  fine. Bundles first loaded in missions were not affected, even when larger.
+  `reforge build --game` and `reforge verify` warn about bundles larger than
+  stock, and `reforge pack --game` tries stronger compression to fit.
 - Game updates change stock hashes. Affected files fall back to stock until
   the mod is rebuilt against the new files.
 - Polychromatic and some other mods ship Wobin's Asset Redirect, which is a

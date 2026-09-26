@@ -55,6 +55,12 @@ class Bundle8Tests(unittest.TestCase):
         restored = b"".join(FakeOodle().decompress(b) for b in layout.blocks)[:layout.length]
         self.assertEqual(restored, logical)
 
+    def test_fits_stock(self):
+        small = bundle8.pack(make_bundle(bytes(1000)), FakeOodle())
+        big = bundle8.pack(make_bundle(bytes(range(256)) * 400), FakeOodle())
+        self.assertEqual(bundle8.fits_stock(small, big), [])
+        self.assertTrue(bundle8.fits_stock(big, small))
+
     def test_rejects_malformed(self):
         data = make_bundle(b"x" * 100)
         with self.assertRaises(bundle8.BundleError):

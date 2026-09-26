@@ -89,7 +89,11 @@ Oodle-compressed like the stock ones. The game's DirectStorage reader crashes
 on chunks stored uncompressed, even though its regular reader accepts them.
 After writing a bundle, run `reforge pack <mod> --game <folder>`, which
 compresses stored chunks with the game's own `oo2core_9_win64.dll` and
-verifies them. `reforge build` refuses bundles with stored chunks. Resource
+verifies them. `reforge build` refuses bundles with stored chunks. Also keep each
+replacement bundle no larger than the stock bundle, with the same number of
+chunks and no chunk larger than the stock one. Darktide reads early
+DirectStorage loads (such as menu weapons) with the stock size and crashes
+on anything larger. `reforge build --game` warns when a bundle does not fit. Resource
 streams under `bundle/data/` are not chunk-compressed and need no packing.
 
 Reforge only delivers files. Producing a correct edited bundle, material or
