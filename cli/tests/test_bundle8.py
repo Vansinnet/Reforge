@@ -58,8 +58,17 @@ class Bundle8Tests(unittest.TestCase):
     def test_fits_stock(self):
         small = bundle8.pack(make_bundle(bytes(1000)), FakeOodle())
         big = bundle8.pack(make_bundle(bytes(range(256)) * 400), FakeOodle())
-        self.assertEqual(bundle8.fits_stock(small, big), [])
+        self.assertEqual(bundle8.fits_stock(small, small), [])
+        self.assertTrue(bundle8.fits_stock(small, big))
         self.assertTrue(bundle8.fits_stock(big, small))
+
+    def test_pack_exact_matches_stock_layout(self):
+        stock = bundle8.pack(make_bundle(bytes(range(256)) * 300), FakeOodle())
+        edited = make_bundle(bytes(range(256)) * 299 + bytes(256))
+        exact = bundle8.pack_exact(edited, FakeOodle(), stock)
+        self.assertEqual(len(exact), len(stock))
+        self.assertEqual(bundle8.parse(exact).sizes, bundle8.parse(stock).sizes)
+        self.assertEqual(bundle8.fits_stock(exact, stock), [])
 
     def test_rejects_malformed(self):
         data = make_bundle(b"x" * 100)

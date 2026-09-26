@@ -255,7 +255,7 @@ def expand(root: Path, data: dict) -> list[dict]:
                 if not HEX64.match(sha):
                     raise ToolError(f"{stock}: sha256 must be 64 hex digits")
                 entry = {"stock": stock, "file": raw["file"], "sha256": sha}
-            for key in ("priority", "contract"):
+            for key in ("priority", "contract", "late_load"):
                 if key in raw:
                     entry[key] = raw[key]
             if not root.joinpath(*raw["file"].split("/")).is_file():
@@ -358,7 +358,7 @@ def stored_problems(root: Path, entries: list[dict]) -> list[str]:
 def size_warnings(root: Path, entries: list[dict], game: Path) -> list[str]:
     warnings = []
     for entry, path in bundle_payloads(root, entries):
-        if entry.get("virtual"):
+        if entry.get("virtual") or entry.get("late_load"):
             continue
         stock = game.joinpath(*entry["stock"].split("/"))
         if not stock.is_file():
@@ -374,9 +374,10 @@ def size_warnings(root: Path, entries: list[dict], game: Path) -> list[str]:
 
 def print_size_warnings(warnings: list[str]) -> None:
     if warnings:
-        print("warning: replacement bundles larger than the stock file crash Darktide if the game loads them "
-              "through DirectStorage before mods start (for example the menu character's weapons). "
-              "Bundles first loaded in missions were not affected. Keep these within the stock size where possible:")
+        print("warning: these bundle replacements do not match the stock layout. Darktide loads bundles it reads "
+              "before mods start (for example the menu character's weapons) with the stock chunk table and crashes "
+              "on any difference. Run `reforge pack --game`, or mark a bundle \"late_load\": true if the game only "
+              "loads it after mods start (for example a package the mod loads itself):")
         for line in warnings:
             print("  " + line)
 
@@ -424,14 +425,18 @@ def verify_entries(game: Path, entries: list[dict]) -> list[str]:
 def cmd_pack(args: argparse.Namespace) -> int:
     root, _ = find_mod(args.mod)
     entries = expand(root, load_source(root))
+    game = find_game(args.game) if (args.game or not args.oodle) else None
     targets = []
     for entry, path in bundle_payloads(root, entries):
-        if bundle8.stored_chunks(path.read_bytes()):
+        data = path.read_bytes()
+        stock = game.joinpath(*entry["stock"].split("/")) if game and not entry.get("virtual") else None
+        exact_needed = (stock is not None and stock.is_file() and not entry.get("late_load")
+                        and len(data) != stock.stat().st_size)
+        if bundle8.stored_chunks(data) or exact_needed:
             targets.append((entry, path))
     if not targets:
-        print("No bundle payload has uncompressed chunks")
+        print("Every bundle payload is compressed and matches its stock layout where required")
         return 0
-    game = find_game(args.game) if (args.game or not args.oodle) else None
     dll = Path(args.oodle) if args.oodle else game / "binaries" / "oo2core_9_win64.dll"
     if not dll.is_file():
         raise ToolError(f"Oodle library not found: {dll}")
@@ -439,11 +444,17 @@ def cmd_pack(args: argparse.Namespace) -> int:
         oodle = bundle8.Oodle(dll)
         for entry, path in targets:
             before = path.read_bytes()
-            fit = None
             stock = game.joinpath(*entry["stock"].split("/")) if game and not entry.get("virtual") else None
-            if stock is not None and stock.is_file():
-                fit = bundle8.parse(stock.read_bytes()).sizes
-            after = bundle8.pack(before, oodle, args.level, fit)
+            if stock is not None and stock.is_file() and not entry.get("late_load"):
+                try:
+                    after = bundle8.pack_exact(before, oodle, stock.read_bytes())
+                    print(f"{entry['file']}: exact stock layout")
+                except bundle8.BundleError as exc:
+                    print(f"warning: {entry['file']}: {exc}; packed normally (safe only if the game "
+                          "loads it after mods start; mark it \"late_load\": true when that is by design)")
+                    after = bundle8.pack(before, oodle, args.level)
+            else:
+                after = bundle8.pack(before, oodle, args.level)
             tmp = path.with_name(path.name + ".reforge-pack.tmp")
             tmp.write_bytes(after)
             os.replace(tmp, path)

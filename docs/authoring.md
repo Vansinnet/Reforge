@@ -87,14 +87,36 @@ that a restart is needed.
 Replacement bundles (`bundle/<16 hex>` files, format 8) must be
 Oodle-compressed like the stock ones. The game's DirectStorage reader crashes
 on chunks stored uncompressed, even though its regular reader accepts them.
-After writing a bundle, run `reforge pack <mod> --game <folder>`, which
-compresses stored chunks with the game's own `oo2core_9_win64.dll` and
-verifies them. `reforge build` refuses bundles with stored chunks. Also keep each
-replacement bundle no larger than the stock bundle, with the same number of
-chunks and no chunk larger than the stock one. Darktide reads early
-DirectStorage loads (such as menu weapons) with the stock size and crashes
-on anything larger. `reforge build --game` warns when a bundle does not fit. Resource
-streams under `bundle/data/` are not chunk-compressed and need no packing.
+
+Darktide also reads some bundles before any mod runs, for example the weapon
+effects of the character shown in the menu. When it loads them later, it
+uses the stock chunk table it already has. For those bundles the replacement
+must match the stock layout exactly: same file size, chunk count and chunk
+sizes. `reforge pack <mod> --game <folder>` does this for edits that keep the
+stock record list. It compresses each chunk with the game's own
+`oo2core_9_win64.dll` and zero-pads it to the stock chunk size. `reforge
+build --game` warns about any bundle that does not match.
+
+### Adding new resources (host packages)
+
+New resources, such as extra particle variants, do not fit an early-loaded
+bundle. Use a host package instead:
+
+1. Pick an existing package that the game never loads on its own. A debug
+   effect such as `content/fx/particles/debug/flame_thrower_test` works; the
+   bundle file name is the murmur64 of the package name.
+2. Replace its bundle with the stock contents plus your new records, and mark
+   the entry `"late_load": true` in `reforge.json`.
+3. After `reforge.commit()`, load any stock packages your records depend on
+   (for example textures), then load the host with `mod:load_package(name,
+   nil, true)`. Otherwise the new records bind to default resources.
+4. Use a new resource only when `Application.can_get_resource(type, name)`
+   is true, and fall back to the stock one otherwise.
+
+RainbowFlame uses this for its colour presets.
+
+Resource streams under `bundle/data/` are not chunk-compressed and need no
+packing.
 
 Reforge only delivers files. Producing a correct edited bundle, material or
 shader program is up to the mod. Keep your extraction and rebuild scripts, and

@@ -158,26 +158,57 @@ class Oodle:
 
 
 def fits_stock(data: bytes, stock: bytes) -> list[str]:
-    """Reasons a replacement bundle may not load early; empty when it fits.
+    """Reasons a replacement bundle does not match the stock layout; empty when it does.
 
-    Observed in game (2026-09-26): when Darktide loads a bundle through its
-    DirectStorage reader early (for example the menu character's weapon
-    effects), it reads with the stock file's size, known from before any mod
-    runs. A replacement larger than the stock bundle is cut off and the game
-    crashes with "Failed to decompress". Same-size or smaller replacements
-    load. Bundles first loaded later (missions) were not affected.
+    Bundles Darktide reads before mods run are loaded with the stock chunk
+    table, so their replacements must match it exactly: a larger chunk
+    crashes with "Failed to decompress", a smaller one with read error
+    0x89240007 (end of file). `pack_exact` produces a matching layout.
     """
     problems = []
     mine, theirs = parse(data), parse(stock)
-    if len(data) > len(stock):
+    if len(data) != len(stock):
         problems.append(f"{len(data):,} bytes, stock {len(stock):,}")
     if len(mine.sizes) != len(theirs.sizes):
         problems.append(f"{len(mine.sizes)} chunks, stock {len(theirs.sizes)}")
-    else:
-        over = [i for i, (a, b) in enumerate(zip(mine.sizes, theirs.sizes)) if a > b]
-        if over:
-            problems.append(f"chunk(s) {over[:5]} larger than stock")
+    elif mine.sizes != theirs.sizes:
+        problems.append("chunk sizes differ from stock")
     return problems
+
+
+def pack_exact(data: bytes, oodle, stock: bytes) -> bytes:
+    """Rebuild `data` with the stock bundle's exact layout.
+
+    Observed in game (2026-09-26): for bundles Darktide reads before mods
+    run, its DirectStorage reader uses the stock chunk table. A larger chunk
+    is cut off ("Failed to decompress") and a smaller one reads past the end
+    of the file (error 0x89240007). Each chunk is therefore compressed as
+    small as possible and zero-padded to the stock chunk size; Oodle ignores
+    bytes after the end of a stream. Needs the same header size and chunk
+    count as stock (true for edits that keep the stock record list).
+    """
+    mine, theirs = parse(data), parse(stock)
+    _require(len(mine.prefix) == len(theirs.prefix), "index differs from stock; exact layout impossible")
+    _require(len(mine.blocks) == len(theirs.blocks), "chunk count differs from stock; exact layout impossible")
+    blocks = []
+    for i, block in enumerate(mine.blocks):
+        raw = block if len(block) == CHUNK else oodle.decompress(block)
+        target = theirs.sizes[i]
+        best = None
+        for level in (LEVEL_OPTIMAL2, 8, 9):
+            candidate = oodle.compress(raw, level)
+            if best is None or len(candidate) < len(best):
+                best = candidate
+            if len(best) <= target:
+                break
+        _require(len(best) <= target, f"chunk {i} needs {len(best)} bytes, stock chunk is {target}")
+        padded = best + bytes(target - len(best))
+        _require(oodle.decompress(padded) == raw, "padded chunk does not decode")
+        blocks.append(padded)
+    result = build(mine, blocks)
+    _require(len(result) == len(stock), "size differs from stock after exact packing")
+    _require(parse(result).sizes == theirs.sizes, "chunk table differs from stock")
+    return result
 
 
 def pack(data: bytes, oodle, level: int = LEVEL_OPTIMAL2, fit: list[int] | None = None) -> bytes:
