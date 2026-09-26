@@ -1,0 +1,74 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build
+        working-directory: native
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+      - name: Test harness (real Windows)
+        working-directory: native
+        run: target\x86_64-pc-windows-msvc\release\reforge-harness.exe target\x86_64-pc-windows-msvc\release\reforge.dll
+      - name: Assemble dist
+        run: python scripts/make_dist.py native/target/x86_64-pc-windows-msvc/release/reforge.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reforge-dist
+          path: dist/
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y luajit
+      - name: Lua library tests
+        run: luajit lua/tests/test_reforge.lua
+      - name: CLI tests
+        run: |
+          mkdir -p dist
+          cp lua/reforge.lua dist/
+          printf 'placeholder' > dist/reforge.dll
+          printf 'placeholder' > dist/REFORGE_NOTICES.txt
+          python3 -m unittest discover -s cli/tests -v
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [native, scripts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reforge-dist
+          path: dist
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          zip ../reforge-${GITHUB_REF_NAME}.zip reforge.dll reforge.lua REFORGE_NOTICES.txt SHA256SUMS
+          cd ..
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --title "Reforge $GITHUB_REF_NAME" \
+            --notes "Built by GitHub Actions from this tag. Verify with: gh attestation verify reforge.dll --repo $GITHUB_REPOSITORY" \
+            reforge-${GITHUB_REF_NAME}.zip dist/reforge.dll dist/reforge.lua dist/REFORGE_NOTICES.txt dist/SHA256SUMS

@@ -1,0 +1,119 @@
+# Reforge
+
+Reforge lets a Warhammer 40,000: Darktide mod replace the game's own files,
+such as particle effects, materials and shader programs, by shipping edited
+copies inside the mod folder. Players install the mod like any other DMF mod
+by dropping it into `mods/`. No installer runs, and no game file is changed on
+disk. Uninstalling means deleting the mod folder.
+
+It has three parts:
+
+| Part | What it is |
+|---|---|
+| `reforge.dll` | A small native library (Rust). While the game runs, it serves read-only opens of registered `bundle/…` files from files in `mods/…`. |
+| `reforge.lua` | The Lua library that mods ship. It loads one shared copy of the DLL, lets several mods coexist, and reports a state for each replaced file. |
+| `reforge` CLI | A tool for mod authors. It scaffolds a mod, records stock hashes, generates the Lua manifest and checks mods after game updates. |
+
+## How it works
+
+1. DMF loads the mod. The mod's script calls `reforge.register_manifest(...)`.
+2. In `on_all_mods_loaded`, the mod calls `reforge.commit()`. The library loads
+   `bin/reforge.dll` through `Mods.lua.ffi` (LuaJIT FFI) and installs hooks on
+   `CreateFileW`, `CreateFileA` and `CreateFile2`, in this process only.
+3. For every registration, the DLL checks that the stock file still has the
+   expected SHA-256. When it does, later read-only opens of that file get a
+   handle to the mod's copy. When the game has been patched and the hash no
+   longer matches, the file stays stock and the mod is told why.
+
+### What the DLL will and won't do
+
+- It redirects only read-only opens under `<game>/bundle/`. Opens for writing
+  or deleting always go to the real file.
+- Replacements must live under `<game>/mods/`. Paths with `..`, drive letters
+  or backslashes are refused.
+- It makes no network calls, writes no files, and patches no memory apart
+  from the three hooks.
+- Only one copy hooks a process. If several mods ship `reforge.dll`, the
+  first loaded copy is shared by all of them.
+- Every export catches panics, so an internal bug falls back to stock files
+  instead of crashing the game.
+
+## For mod authors
+
+The steps below use Windows, Python 3.9+ and the `reforge.cmd` wrapper in this
+folder.
+
+```bat
+reforge init path\to\mods\MyShaderMod --author "Me"
+reforge add path\to\mods\MyShaderMod 98bb14b1d247a0c8 --copy
+rem edit path\to\mods\MyShaderMod\payload\98bb14b1d247a0c8 with your own tools
+reforge build path\to\mods\MyShaderMod --game "C:\...\Warhammer 40,000 DARKTIDE"
+```
+
+- `add` records the stock file's SHA-256 in `reforge.json`. With `--copy`, it
+  also copies the stock file into `payload/` as a starting point for editing.
+- `add-virtual` and `add-virtual-dir` serve files at game paths that do not
+  exist yet. Use them for extra resources that a replaced bundle refers to.
+- `build` validates everything and writes
+  `scripts/mods/<Mod>/reforge_manifest.lua`. It also copies the current
+  `reforge.lua`, `bin/reforge.dll` and `bin/REFORGE_NOTICES.txt` into the mod.
+- After a game update, `verify` shows which stock files changed.
+
+See [docs/authoring.md](docs/authoring.md) for the Lua API, file states and
+coexistence rules, and [docs/ABI.md](docs/ABI.md) for the C ABI.
+
+## File states
+
+| State | Meaning |
+|---|---|
+| `active` | This mod's file is being served. |
+| `shared` | Another mod won, but it serves a byte-identical file. |
+| `compatible` | Another mod won with the same `contract` string. |
+| `displaced` | Another mod's different file is served. |
+| `refused` | The stock file changed (game update), the payload is missing, or a path is invalid. See `reforge.reason(handle)`. |
+| `restart_required` | The game already opened this file this session with other contents. The change applies after a restart. |
+| `unavailable` | `reforge.dll` could not be loaded. |
+| `pending` | `commit()` has not run yet. |
+
+In game, `/reforge` lists every replaced file. `/reforge on|off` toggles
+redirects for files opened after that point. `/reforge trace on|off|dump`
+writes a file trace to the log.
+
+## Limits
+
+- Files the game opened before `reforge.dll` was installed cannot be detected
+  after the fact. Most effect and material bundles load with missions, after
+  mods load. A file loaded at boot needs a restart to be picked up.
+- Game updates change stock hashes. Affected files fall back to stock until
+  the mod is rebuilt against the new files.
+- `reforge.dll` and another hooking DLL, such as Polychromatic's
+  `asset-redirect.dll`, can run side by side. If both replace the same file,
+  the hook installed last wins.
+
+## Building
+
+- **Windows (MSVC):** `powershell -File scripts\build.ps1 -Test`. This builds,
+  runs the harness and refreshes `dist/`.
+- **Linux cross-build + Wine:** `scripts/build-cross.sh`.
+- **Tests:**
+  - `luajit lua/tests/test_reforge.lua`
+  - `python -m unittest discover -s cli/tests`
+  - `lua/tests/integration.lua`, which runs real LuaJIT FFI against the real DLL.
+
+Release builds come only from GitHub Actions. Each tag produces a draft
+release with build provenance you can check with
+`gh attestation verify reforge.dll --repo Vansinnet/Reforge`. The DLL is
+unsigned. Antivirus heuristics may flag any unsigned DLL that hooks
+`CreateFileW`. Compare the file against the release's `SHA256SUMS` and
+attestation, and report false positives to your antivirus vendor. Never
+disable scanning.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). The DLL includes MinHook (BSD-2-Clause); see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Mods that ship
+`reforge.dll` must ship `REFORGE_NOTICES.txt` with it, and `reforge build`
+does that automatically.
+
+Reforge is a community tool. It is not affiliated with Fatshark or Games
+Workshop.

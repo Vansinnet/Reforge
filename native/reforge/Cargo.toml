@@ -1,0 +1,27 @@
+[package]
+name = "reforge"
+description = "In-process asset redirect for Warhammer 40,000: Darktide mods"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+minhook = "0.9"
+serde_json = "1"
+sha2 = "0.11"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_Globalization",
+] }
+
+[build-dependencies]
+embed-resource = "3"
