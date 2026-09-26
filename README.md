@@ -86,9 +86,11 @@ writes a file trace to the log.
   mods load. A file loaded at boot needs a restart to be picked up.
 - Game updates change stock hashes. Affected files fall back to stock until
   the mod is rebuilt against the new files.
-- `reforge.dll` and another hooking DLL, such as Polychromatic's
-  `asset-redirect.dll`, can run side by side. If both replace the same file,
-  the hook installed last wins.
+- Polychromatic and some other mods ship Wobin's Asset Redirect, which is a
+  separate hooking DLL. Two hooks serving the same file would race, so
+  Reforge leaves any file that Asset Redirect also registers to Asset
+  Redirect. That file reports `displaced`, and `reforge.winner(handle)` names
+  the other mod. Files only one of them replaces are unaffected.
 
 ## Building
 

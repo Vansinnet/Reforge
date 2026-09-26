@@ -337,5 +337,23 @@ do
 	check("wrong manifest schema rejected", #none == 0 and alpha.errors[1] ~= nil)
 end
 
+do
+	local world = { stock = STOCK, payload = { ["mods/Alpha/p/aa"] = "h1", ["mods/Alpha/p/bb"] = "h3" } }
+	local reforge = fresh(world)
+	local alpha = new_mod("Alpha")
+
+	_G.__asset_redirect_instance = { files = { aa = { regs = { { owner = "Polychromatic" } } } } }
+
+	local a = reforge.register(alpha, { stock = "bundle/aa", file = "p/aa", sha256 = "sha-aa" })
+	local b = reforge.register(alpha, { stock = "bundle/bb", file = "p/bb", sha256 = "sha-bb" })
+
+	reforge.commit()
+	check("file also served by Asset Redirect is displaced", reforge.state(a) == "displaced", reforge.state(a))
+	check("displaced file is not pushed to the dll", world.dll.redirects["bundle/aa"] == nil)
+	check("winner names the Asset Redirect owner", reforge.winner(a) == "Polychromatic")
+	check("other files unaffected", reforge.state(b) == "active")
+	_G.__asset_redirect_instance = nil
+end
+
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

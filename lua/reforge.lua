@@ -391,8 +391,46 @@ local function resolve(stock)
 	end
 end
 
+-- Polychromatic and other mods may ship Wobin's Asset Redirect, a separate
+-- hooking DLL. Two hooks serving the same file would race, so a file that
+-- Asset Redirect also serves is left to it and reported as displaced.
+local function asset_redirect_owner(stock)
+	local other = rawget(_G, "__asset_redirect_instance")
+	local files = type(other) == "table" and other.files
+
+	if type(files) ~= "table" or type(stock) ~= "string" then
+		return nil
+	end
+
+	local file = files[stock:sub(8)]
+	local regs = type(file) == "table" and file.regs
+
+	if type(regs) ~= "table" then
+		return nil
+	end
+
+	for _, reg in ipairs(regs) do
+		if type(reg) == "table" and reg.owner ~= nil then
+			return tostring(reg.owner)
+		end
+	end
+
+	return nil
+end
+
 local function validate(reg)
 	local reason = spec_error(reg.spec)
+
+	reg.foreign = nil
+
+	if not reason then
+		local owner = asset_redirect_owner(reg.stock)
+
+		if owner then
+			reg.foreign = owner
+			reason = "also replaced by " .. owner .. " through Asset Redirect; left to it"
+		end
+	end
 
 	reg.valid = reason == nil
 	reg.reason = reason
@@ -503,6 +541,10 @@ function core.state(reg)
 		return "unavailable"
 	end
 
+	if reg.foreign then
+		return "displaced"
+	end
+
 	if not reg.valid then
 		return "refused"
 	end
@@ -541,6 +583,10 @@ function core.reason(reg)
 end
 
 function core.winner(reg)
+	if type(reg) == "table" and reg.foreign then
+		return reg.foreign, nil
+	end
+
 	local file = type(reg) == "table" and instance.files[reg.stock]
 	local winner = file and file.winner
 
