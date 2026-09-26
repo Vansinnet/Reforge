@@ -219,6 +219,17 @@ do
 	local late = reforge.register(beta, { stock = "bundle/cc", file = "p/cc", sha256 = "sha-cc" })
 	check("late registration of an opened file needs restart", reforge.state(late) == "restart_required", reforge.state(late))
 
+	reforge.clear(beta)
+	check("clearing an opened file back to stock is not a restart", _G.__reforge_instance.files["bundle/cc"].restart == false)
+	world.dll.opens["bundle/bb"] = 1
+	reforge.clear(alpha)
+	a2 = reforge.register(alpha, { stock = "bundle/bb", file = "p/bb", sha256 = "sha-bb" })
+	check("hot reload (clear + identical re-register) needs no restart", reforge.state(a2) == "active", reforge.state(a2))
+	world.payload["mods/Beta/p/cc"] = "h6"
+	local beta2 = reforge.register(beta, { stock = "bundle/bb", file = "p/cc", sha256 = "sha-bb", priority = 1 })
+	check("switching away from the loaded payload needs restart", reforge.state(beta2) == "restart_required", reforge.state(beta2))
+	reforge.clear(beta)
+	check("switching back to the loaded payload clears restart", reforge.state(a2) == "active", reforge.state(a2))
 	check("set_enabled returns previous", reforge.set_enabled(false) == true and world.dll.enabled == 0)
 
 	alpha.commands.reforge()

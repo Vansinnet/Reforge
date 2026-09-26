@@ -321,6 +321,18 @@ local function pick_winner(file, skip)
 	return best
 end
 
+-- The game keeps what it loaded. `loaded` is the payload (false = stock) that
+-- was being served when the file was first seen opened; a restart is needed
+-- only while the served payload differs from it.
+local function settle(file, opened)
+	if opened then
+		file.restart = (file.pushed or false) ~= file.loaded
+	else
+		file.loaded = nil
+		file.restart = false
+	end
+end
+
 -- Pushes the best valid registration for `stock` to the DLL. The DLL checks
 -- the stock SHA-256 and all paths; a refused candidate is skipped and the next
 -- one tried.
@@ -328,6 +340,11 @@ local function resolve(stock)
 	local file = instance.files[stock]
 	local native = instance.native
 	local skip = {}
+	local opened = native.Reforge_Opens(stock) > 0
+
+	if opened and file.loaded == nil then
+		file.loaded = file.pushed or false
+	end
 
 	while true do
 		local winner = pick_winner(file, skip)
@@ -336,11 +353,7 @@ local function resolve(stock)
 		if target == file.pushed then
 			file.winner = winner
 
-			return
-		end
-
-		if native.Reforge_Opens(stock) > 0 then
-			file.restart = true
+			return settle(file, opened)
 		end
 
 		if not winner then
@@ -348,7 +361,7 @@ local function resolve(stock)
 			file.pushed = nil
 			file.winner = nil
 
-			return
+			return settle(file, opened)
 		end
 
 		local ok, err
@@ -363,7 +376,7 @@ local function resolve(stock)
 			file.pushed = target
 			file.winner = winner
 
-			return
+			return settle(file, opened)
 		end
 
 		winner.valid = false
