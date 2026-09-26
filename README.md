@@ -131,6 +131,13 @@ unsigned. Antivirus heuristics may flag any unsigned DLL that hooks
 attestation, and report false positives to your antivirus vendor. Never
 disable scanning.
 
+## Credits
+
+Thanks to Wobin for the original Asset Redirect DLL for Darktide. His work
+showed that mods could serve replacement game resources from their own folders
+and inspired Reforge. Reforge is an independent implementation; it does not
+include Wobin's DLL or source code.
+
 ## Licence
 
 MIT, see [LICENSE](LICENSE). The DLL includes MinHook (BSD-2-Clause); see
