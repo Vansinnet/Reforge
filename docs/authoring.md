@@ -84,6 +84,14 @@ that a restart is needed.
 
 ## Editing shaders and materials
 
+Replacement bundles (`bundle/<16 hex>` files, format 8) must be
+Oodle-compressed like the stock ones. The game's DirectStorage reader crashes
+on chunks stored uncompressed, even though its regular reader accepts them.
+After writing a bundle, run `reforge pack <mod> --game <folder>`, which
+compresses stored chunks with the game's own `oo2core_9_win64.dll` and
+verifies them. `reforge build` refuses bundles with stored chunks. Resource
+streams under `bundle/data/` are not chunk-compressed and need no packing.
+
 Reforge only delivers files. Producing a correct edited bundle, material or
 shader program is up to the mod. Keep your extraction and rebuild scripts, and
 the game build they were made against, in your mod's development folder. Do

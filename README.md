@@ -47,6 +47,7 @@ folder.
 reforge init path\to\mods\MyShaderMod --author "Me"
 reforge add path\to\mods\MyShaderMod 98bb14b1d247a0c8 --copy
 rem edit path\to\mods\MyShaderMod\payload\98bb14b1d247a0c8 with your own tools
+reforge pack path\to\mods\MyShaderMod --game "C:\...\Warhammer 40,000 DARKTIDE"
 reforge build path\to\mods\MyShaderMod --game "C:\...\Warhammer 40,000 DARKTIDE"
 ```
 
@@ -54,7 +55,14 @@ reforge build path\to\mods\MyShaderMod --game "C:\...\Warhammer 40,000 DARKTIDE"
   also copies the stock file into `payload/` as a starting point for editing.
 - `add-virtual` and `add-virtual-dir` serve files at game paths that do not
   exist yet. Use them for extra resources that a replaced bundle refers to.
-- `build` validates everything and writes
+- `pack` Oodle-compresses bundle payloads whose 512 KiB chunks are stored
+  uncompressed. Use it after writing a bundle with your own tools. The game's
+  DirectStorage reader crashes on stored chunks with "Failed to decompress ...
+  from package". `pack` uses the Oodle library installed with the game, which
+  is not redistributable, so it needs Windows. It checks every chunk by
+  decompressing it again.
+- `build` refuses a bundle payload that still has stored chunks, then
+  validates everything and writes
   `scripts/mods/<Mod>/reforge_manifest.lua`. It also copies the current
   `reforge.lua`, `bin/reforge.dll` and `bin/REFORGE_NOTICES.txt` into the mod.
 - After a game update, `verify` shows which stock files changed.

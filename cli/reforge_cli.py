@@ -21,6 +21,9 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bundle8  # noqa: E402
+
 TOOL_VERSION = "0.1.0"
 SCHEMA = 1
 TOOL_ROOT = Path(__file__).resolve().parent.parent
@@ -328,10 +331,40 @@ def sync_runtime(root: Path, name: str, quiet: bool = False) -> bool:
     return changed
 
 
+def bundle_payloads(root: Path, entries: list[dict]) -> list[tuple[dict, Path]]:
+    """Payload files that are format-8 bundles."""
+    found = []
+    for entry in entries:
+        path = root.joinpath(*entry["file"].split("/"))
+        with path.open("rb") as handle:
+            if bundle8.is_bundle(handle.read(8)):
+                found.append((entry, path))
+    return found
+
+
+def stored_problems(root: Path, entries: list[dict]) -> list[str]:
+    problems = []
+    for entry, path in bundle_payloads(root, entries):
+        try:
+            count = bundle8.stored_chunks(path.read_bytes())
+        except bundle8.BundleError as exc:
+            problems.append(f"{entry['file']}: {exc}")
+            continue
+        if count:
+            problems.append(f"{entry['file']}: {count} uncompressed chunk(s)")
+    return problems
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     root, name = find_mod(args.mod)
     data = load_source(root)
     entries = expand(root, data)
+    problems = stored_problems(root, entries)
+    if problems:
+        raise ToolError(
+            "bundles with uncompressed (stored) chunks crash Darktide's DirectStorage reader "
+            "(\"Failed to decompress ... from package\"). Run `reforge pack` first:\n  " + "\n  ".join(problems)
+        )
     if args.game:
         failures = verify_entries(find_game(args.game), entries)
         if failures:
@@ -358,6 +391,33 @@ def verify_entries(game: Path, entries: list[dict]) -> list[str]:
         if actual != entry["sha256"]:
             failures.append(f"{entry['stock']}: sha256 {actual}, expected {entry['sha256']} (game updated?)")
     return failures
+
+
+def cmd_pack(args: argparse.Namespace) -> int:
+    root, _ = find_mod(args.mod)
+    entries = expand(root, load_source(root))
+    targets = []
+    for entry, path in bundle_payloads(root, entries):
+        if bundle8.stored_chunks(path.read_bytes()):
+            targets.append((entry, path))
+    if not targets:
+        print("No bundle payload has uncompressed chunks")
+        return 0
+    dll = Path(args.oodle) if args.oodle else find_game(args.game) / "binaries" / "oo2core_9_win64.dll"
+    if not dll.is_file():
+        raise ToolError(f"Oodle library not found: {dll}")
+    try:
+        oodle = bundle8.Oodle(dll)
+        for entry, path in targets:
+            before = path.read_bytes()
+            after = bundle8.pack(before, oodle, args.level)
+            tmp = path.with_name(path.name + ".reforge-pack.tmp")
+            tmp.write_bytes(after)
+            os.replace(tmp, path)
+            print(f"Packed {entry['file']}: {len(before):,} -> {len(after):,} bytes")
+    except bundle8.BundleError as exc:
+        raise ToolError(str(exc)) from exc
+    return 0
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -430,6 +490,13 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("mod")
     s.add_argument("--game", help="also check every stock sha256 against this game folder")
     s.set_defaults(func=cmd_build)
+
+    s = sub.add_parser("pack", help="Oodle-compress uncompressed chunks in the mod's bundle payloads (Windows)")
+    s.add_argument("mod")
+    s.add_argument("--game", help="Darktide folder; its binaries/oo2core_9_win64.dll is used")
+    s.add_argument("--oodle", help="explicit path to oo2core_9_win64.dll")
+    s.add_argument("--level", type=int, default=bundle8.LEVEL_NORMAL, help="Oodle level (default 4, Normal)")
+    s.set_defaults(func=cmd_pack)
 
     s = sub.add_parser("verify", help="check that stock files still match after a game update")
     s.add_argument("mod")
