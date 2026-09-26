@@ -30,12 +30,14 @@ static ORIG_ATTR_EX_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 static ORIG_ATTR_EX_A: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 static ORIG_ATTR_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 static ORIG_ATTR_A: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+static ORIG_FIND_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 static ORIG_FIND_EX_W: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 
 type AttrExWFn = unsafe extern "system" fn(*const u16, i32, *mut c_void) -> BOOL;
 type AttrExAFn = unsafe extern "system" fn(*const u8, i32, *mut c_void) -> BOOL;
 type AttrWFn = unsafe extern "system" fn(*const u16) -> u32;
 type AttrAFn = unsafe extern "system" fn(*const u8) -> u32;
+type FindWFn = unsafe extern "system" fn(*const u16, *mut WIN32_FIND_DATAW) -> HANDLE;
 type FindExWFn = unsafe extern "system" fn(*const u16, i32, *mut WIN32_FIND_DATAW, i32, *const c_void, u32) -> HANDLE;
 static INSTALL_LOCK: Mutex<()> = Mutex::new(());
 
@@ -293,6 +295,36 @@ unsafe extern "system" fn detour_attr_a(name: *const u8) -> u32 {
     }
 }
 
+fn restore_find_name(name: *const u16, data: *mut WIN32_FIND_DATAW) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let len = unsafe { wide_len(name) }.unwrap_or(0);
+        let full = unsafe { std::slice::from_raw_parts(name, len) };
+        let start = full.iter().rposition(|&c| c == '\\' as u16 || c == '/' as u16).map_or(0, |i| i + 1);
+        let leaf = &full[start..];
+        let out = unsafe { &mut (*data).cFileName };
+        if leaf.len() < out.len() {
+            out.fill(0);
+            out[..leaf.len()].copy_from_slice(leaf);
+            unsafe { (*data).cAlternateFileName.fill(0) };
+        }
+    }));
+}
+
+unsafe extern "system" fn detour_find_w(name: *const u16, data: *mut WIN32_FIND_DATAW) -> HANDLE {
+    let orig: FindWFn = unsafe { std::mem::transmute(ORIG_FIND_W.load(Ordering::Acquire)) };
+    let Some(_guard) = Guard::enter() else {
+        return unsafe { orig(name, data) };
+    };
+    let Some(replacement) = meta_wide(name) else {
+        return unsafe { orig(name, data) };
+    };
+    let handle = unsafe { orig(replacement.as_ptr(), data) };
+    if handle != INVALID_HANDLE_VALUE && !data.is_null() {
+        restore_find_name(name, data);
+    }
+    handle
+}
+
 unsafe extern "system" fn detour_find_ex_w(
     name: *const u16,
     level: i32,
@@ -310,19 +342,7 @@ unsafe extern "system" fn detour_find_ex_w(
     };
     let handle = unsafe { orig(replacement.as_ptr(), level, data, op, filter, flags) };
     if handle != INVALID_HANDLE_VALUE && !data.is_null() {
-        // Report the requested file name, not the replacement's.
-        let _ = catch_unwind(AssertUnwindSafe(|| {
-            let len = unsafe { wide_len(name) }.unwrap_or(0);
-            let full = unsafe { std::slice::from_raw_parts(name, len) };
-            let start = full.iter().rposition(|&c| c == '\\' as u16 || c == '/' as u16).map_or(0, |i| i + 1);
-            let leaf = &full[start..];
-            let out = unsafe { &mut (*data).cFileName };
-            if leaf.len() < out.len() {
-                out.fill(0);
-                out[..leaf.len()].copy_from_slice(leaf);
-                unsafe { (*data).cAlternateFileName.fill(0) };
-            }
-        }));
+        restore_find_name(name, data);
     }
     handle
 }
@@ -379,6 +399,7 @@ pub fn install() -> Result<(), String> {
             ("GetFileAttributesExA", detour_attr_ex_a as *mut c_void, &ORIG_ATTR_EX_A),
             ("GetFileAttributesW", detour_attr_w as *mut c_void, &ORIG_ATTR_W),
             ("GetFileAttributesA", detour_attr_a as *mut c_void, &ORIG_ATTR_A),
+            ("FindFirstFileW", detour_find_w as *mut c_void, &ORIG_FIND_W),
             ("FindFirstFileExW", detour_find_ex_w as *mut c_void, &ORIG_FIND_EX_W),
         ] {
             hook(proc_name, detour, slot)?;

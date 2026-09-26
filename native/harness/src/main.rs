@@ -15,7 +15,7 @@ use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{CloseHandle, FreeLibrary, HANDLE, HMODULE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFile2, CreateFileA, CreateFileW, FILE_ATTRIBUTE_NORMAL, FindClose, FindFirstFileW, GetFileAttributesA,
+    CreateFile2, CreateFileA, CreateFileW, FILE_ATTRIBUTE_NORMAL, FindClose, FindFirstFileExW, FindFirstFileW, GetFileAttributesA,
     GetFileAttributesExA, GetFileAttributesExW, GetFileAttributesW, GetFileExInfoStandard, GetShortPathNameW,
     INVALID_FILE_ATTRIBUTES, WIN32_FILE_ATTRIBUTE_DATA, WIN32_FIND_DATAW, FILE_SHARE_READ, OPEN_EXISTING, ReadFile,
 };
@@ -331,6 +331,11 @@ fn main() {
     let h = unsafe { FindFirstFileW(wide("..\\bundle\\aaaa1111").as_ptr(), &mut find) };
     let fname = String::from_utf16_lossy(&find.cFileName[..find.cFileName.iter().position(|&c| c == 0).unwrap_or(0)]);
     t.check("FindFirstFileW reports replacement size under the stock name", h != INVALID_HANDLE_VALUE && find.nFileSizeLow == 5 && fname == "aaaa1111", (&fname, find.nFileSizeLow));
+    if h != INVALID_HANDLE_VALUE { unsafe { FindClose(h) }; }
+    let mut find: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
+    let h = unsafe { FindFirstFileExW(wide("..\\bundle\\aaaa1111").as_ptr(), 0, &mut find, 0, null(), 0) };
+    let fname = String::from_utf16_lossy(&find.cFileName[..find.cFileName.iter().position(|&c| c == 0).unwrap_or(0)]);
+    t.check("FindFirstFileExW reports replacement size under the stock name", h != INVALID_HANDLE_VALUE && find.nFileSizeLow == 5 && fname == "aaaa1111", (&fname, find.nFileSizeLow));
     if h != INVALID_HANDLE_VALUE { unsafe { FindClose(h) }; }
     let mut find: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
     let h = unsafe { FindFirstFileW(wide("..\\bundle\\*").as_ptr(), &mut find) };
