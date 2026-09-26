@@ -11,7 +11,7 @@ fn main() {
     let numeric = format!("{},{},{},0", parts[0], parts[1], parts[2]);
     let macros = [
         format!("REFORGE_VERSION_NUM={numeric}"),
-        format!("REFORGE_VERSION_STR=\\\"{version}\\\""),
+        format!("REFORGE_VERSION_STR=\"{version}\""),
     ];
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         embed_resource::compile("reforge.rc", &macros).manifest_optional().unwrap();
