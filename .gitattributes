@@ -1,0 +1,4 @@
+# Keep LF in every checkout, including the Windows release runner, so the
+# released reforge.lua is byte-identical to the copy mods ship.
+*.lua text eol=lf
+*.mod text eol=lf
