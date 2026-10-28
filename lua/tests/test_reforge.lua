@@ -17,7 +17,7 @@ end
 -- Fake DLL -------------------------------------------------------------------
 
 local function new_dll(world)
-	local dll = { redirects = {}, opens = world.opens or {}, adds = {}, enabled = 1, installs = 0 }
+	local dll = { redirects = {}, opens = world.opens or {}, adds = {}, pushed = {}, enabled = 1, installs = 0 }
 
 	local function put(buf, text)
 		buf.value = text
@@ -40,6 +40,7 @@ local function new_dll(world)
 	end
 	dll.Reforge_Add = function(stock, replacement, sha, buf)
 		dll.adds[#dll.adds + 1] = { stock, replacement, sha }
+		dll.pushed[#dll.pushed + 1] = stock
 		if world.stock[stock] == nil then
 			put(buf, stock .. " does not exist in this game version")
 			return 0
@@ -56,6 +57,7 @@ local function new_dll(world)
 		return 1
 	end
 	dll.Reforge_AddNew = function(stock, replacement, buf)
+		dll.pushed[#dll.pushed + 1] = stock
 		if world.stock[stock] ~= nil then
 			put(buf, stock .. " exists in the game")
 			return 0
@@ -209,7 +211,7 @@ do
 	check("winner reports owner", reforge.winner(a1) == "Beta")
 
 	local lib_version, dll_version = reforge.version()
-	check("version", lib_version == 1 and dll_version == "9.9.9", dll_version)
+	check("version", lib_version == 2 and dll_version == "9.9.9", dll_version)
 
 	reforge.clear(beta)
 	check("clear hands the file back", reforge.state(a1) == "active" and world.dll.redirects["bundle/aa"] == "mods/Alpha/p/aa")
@@ -233,7 +235,7 @@ do
 	check("set_enabled returns previous", reforge.set_enabled(false) == true and world.dll.enabled == 0)
 
 	alpha.commands.reforge()
-	check("status command echoes summary", alpha.echoes[#alpha.echoes]:find("Reforge 1, DLL 9.9.9", 1, true) ~= nil, alpha.echoes[#alpha.echoes])
+	check("status command echoes summary", alpha.echoes[#alpha.echoes]:find("Reforge 2, DLL 9.9.9", 1, true) ~= nil, alpha.echoes[#alpha.echoes])
 
 	local again = dofile(LIB)
 	check("reload keeps shared state", again.state(a2) == "active" and _G.Mods.lua.ffi.cdefs == 2)
@@ -353,6 +355,19 @@ do
 	check("winner names the Asset Redirect owner", reforge.winner(a) == "Polychromatic")
 	check("other files unaffected", reforge.state(b) == "active")
 	_G.__asset_redirect_instance = nil
+end
+
+do
+	local world = { stock = STOCK, payload = { ["mods/Alpha/p/new"] = "h1", ["mods/Beta/p/aa"] = "h2" } }
+	local reforge = fresh(world)
+	local alpha, beta = new_mod("Alpha"), new_mod("Beta")
+
+	reforge.register(alpha, { stock = "bundle/zz", file = "p/new", virtual = true })
+	local b = reforge.register(beta, { stock = "bundle/aa", file = "p/aa", sha256 = "sha-aa" })
+
+	reforge.commit()
+	check("existing files are pushed before earlier-registered virtual ones", world.dll.pushed[1] == "bundle/aa" and world.dll.pushed[2] == "bundle/zz", table.concat(world.dll.pushed, ","))
+	check("reordered file active", reforge.state(b) == "active", reforge.state(b))
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))
