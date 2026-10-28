@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import re
 import shutil
 import subprocess
 import sys
@@ -93,7 +94,7 @@ class CliTests(unittest.TestCase):
     def test_sync_refuses_downgrade(self):
         run("init", str(self.mod))
         lua = self.mod / "scripts/mods/MyMod/reforge.lua"
-        lua.write_text(lua.read_text().replace("local LIB_VERSION = 1", "local LIB_VERSION = 99"))
+        lua.write_text(re.sub(r"^local LIB_VERSION = \d+", "local LIB_VERSION = 99", lua.read_text(), flags=re.M))
         code, out = run("sync", str(self.mod))
         self.assertEqual(code, 2)
         self.assertIn("newer than this tool", out)
