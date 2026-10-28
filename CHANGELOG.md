@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (2026-10-28)
 
 - Library 2: `commit()` pushes replacements of existing game files before virtual files. In game, Darktide opened two of RainbowFlame's early-loaded weapon bundles while the commit was still working through other mods' 1,600+ virtual files, so they needed a restart in 4 of 7 starts. A newer library takes over before the commit, so one mod shipping library 2 is enough.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-09-26)
 
 - First version: `reforge.dll` (ABI 1), `reforge.lua` (library 1), `reforge` CLI (init, add, add-virtual, add-virtual-dir, build, verify, sync, info).
 - Offline test suites: DLL harness (real Win32 calls, run under Wine/Windows), Lua library with a fake DLL, LuaJIT FFI end-to-end, CLI.

@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bundle8  # noqa: E402
 
-TOOL_VERSION = "0.1.0"
+TOOL_VERSION = "0.1.1"
 SCHEMA = 1
 TOOL_ROOT = Path(__file__).resolve().parent.parent
 DIST = TOOL_ROOT / "dist"

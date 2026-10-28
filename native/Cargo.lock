@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "reforge"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "embed-resource",
  "minhook",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "reforge-harness"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "windows-sys",
