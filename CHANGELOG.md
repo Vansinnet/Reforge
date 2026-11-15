@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Library 3: replacements of existing game files are served from registration, not from `commit()`. DMF runs `on_all_mods_loaded` in reverse load order, so a mod loaded after a Reforge mod could load a package with a replaced file first: with VFX Swapper installed, RainbowFlame's flamer stream bundle needed a restart on every start, and a restart never helped. The DLL now loads at the first registration; a failure there stays quiet and is retried with the next carrier and reported at commit. Virtual files and the final winner of each file are still settled at `commit()`, and a newer library that takes over before the commit serves the older library's registrations with its own first registration.
+
 ## 0.1.1 (2026-10-28)
 
 - Library 2: `commit()` pushes replacements of existing game files before virtual files. In game, Darktide opened two of RainbowFlame's early-loaded weapon bundles while the commit was still working through other mods' 1,600+ virtual files, so they needed a restart in 4 of 7 starts. A newer library takes over before the commit, so one mod shipping library 2 is enough.

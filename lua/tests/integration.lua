@@ -38,6 +38,7 @@ check("stock before commit", read("../bundle/aaaa1111") == "STOCK-A")
 local h = reforge.register(alpha, { stock = "bundle/aaaa1111", file = "payload/a.bin", sha256 = sha })
 local v = reforge.register(alpha, { stock = "bundle/cccc3333", file = "payload/new.bin", virtual = true })
 local bad = reforge.register(alpha, { stock = "bundle/bbbb2222", file = "payload/a.bin", sha256 = string.rep("0", 64) })
+check("existing file served at registration", read("../bundle/aaaa1111") == "MOD-A", read("../bundle/aaaa1111"))
 reforge.commit()
 
 check("dll loaded", select(2, reforge.version()) ~= nil, alpha.errors[1])

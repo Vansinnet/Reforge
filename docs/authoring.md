@@ -61,7 +61,7 @@ end
 |---|---|
 | `reforge.register(mod, spec)` | Registers one file. Registering the same stock again from the same mod updates it, which is safe on hot reload. |
 | `reforge.register_manifest(mod, path_or_table)` | Registers every entry of a schema 1 manifest. |
-| `reforge.commit()` | Loads the DLL and applies registrations. Later registrations apply immediately. |
+| `reforge.commit()` | Settles the winner of every file and adds virtual files. Replacements of existing files are already served from registration; later registrations apply immediately. |
 | `reforge.state(h)`, `reforge.served(state)`, `reforge.reason(h)`, `reforge.winner(h)` | Per-file result. |
 | `reforge.clear(mod)` | Drops every registration from `mod`, for example in `on_unload`. |
 | `reforge.set_enabled(bool)` | Toggles serving for files opened afterwards. |
@@ -72,8 +72,9 @@ end
 
 Each mod ships its own `reforge.lua` and `bin/reforge.dll`. The first
 library to load stores its state in `_G.__reforge_instance`, and every later
-copy uses that shared state. At commit, the DLL is loaded once. The candidates
-are tried in this order:
+copy uses that shared state. The DLL is loaded once, at the first registration
+(a failure there is retried when another mod registers, and reported at
+commit). The candidates are tried in this order:
 
 1. An already loaded `reforge.dll`.
 2. The copies shipped by mods with the newest library version.

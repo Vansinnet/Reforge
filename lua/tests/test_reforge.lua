@@ -196,7 +196,9 @@ do
 	local v1 = reforge.register(alpha, { stock = "bundle/zz", file = "p/new", virtual = true })
 
 	check("pending before commit", reforge.state(a1) == "pending")
-	check("dll not loaded before commit", #_G.Mods.lua.ffi.loads == 0)
+	check("dll loaded at the first registration", #_G.Mods.lua.ffi.loads == 1, #_G.Mods.lua.ffi.loads)
+	check("existing file served before commit", world.dll.redirects["bundle/aa"] == "mods/Beta/p/aa" and world.dll.redirects["bundle/bb"] == "mods/Alpha/p/bb", world.dll.redirects["bundle/aa"])
+	check("virtual file waits for the commit", world.dll.redirects["bundle/zz"] == nil)
 
 	reforge.commit()
 
@@ -211,7 +213,7 @@ do
 	check("winner reports owner", reforge.winner(a1) == "Beta")
 
 	local lib_version, dll_version = reforge.version()
-	check("version", lib_version == 2 and dll_version == "9.9.9", dll_version)
+	check("version", lib_version == 3 and dll_version == "9.9.9", dll_version)
 
 	reforge.clear(beta)
 	check("clear hands the file back", reforge.state(a1) == "active" and world.dll.redirects["bundle/aa"] == "mods/Alpha/p/aa")
@@ -235,7 +237,7 @@ do
 	check("set_enabled returns previous", reforge.set_enabled(false) == true and world.dll.enabled == 0)
 
 	alpha.commands.reforge()
-	check("status command echoes summary", alpha.echoes[#alpha.echoes]:find("Reforge 2, DLL 9.9.9", 1, true) ~= nil, alpha.echoes[#alpha.echoes])
+	check("status command echoes summary", alpha.echoes[#alpha.echoes]:find("Reforge 3, DLL 9.9.9", 1, true) ~= nil, alpha.echoes[#alpha.echoes])
 
 	local again = dofile(LIB)
 	check("reload keeps shared state", again.state(a2) == "active" and _G.Mods.lua.ffi.cdefs == 2)
@@ -284,8 +286,11 @@ do
 	reforge.register(alpha, { stock = "bundle/bb", file = "p/bb", sha256 = "sha-bb" })
 	local b = reforge.register(beta, { stock = "bundle/aa", file = "p/aa", sha256 = "sha-aa" })
 
+	local loads = _G.Mods.lua.ffi.loads
+	check("early dll failure stays quiet and pending", #alpha.errors == 0 and _G.__reforge_instance.native_state == "ready")
 	reforge.commit()
-	check("falls back to another carrier's dll", _G.Mods.lua.ffi.loads[2] == "../mods/Beta/bin/reforge.dll" and reforge.state(b) == "active")
+	check("falls back to another carrier's dll", loads[#loads] == "../mods/Beta/bin/reforge.dll" and reforge.state(b) == "active", loads[#loads])
+	check("one early attempt per new carrier", #loads <= 3, #loads)
 end
 
 do
@@ -368,6 +373,61 @@ do
 	reforge.commit()
 	check("existing files are pushed before earlier-registered virtual ones", world.dll.pushed[1] == "bundle/aa" and world.dll.pushed[2] == "bundle/zz", table.concat(world.dll.pushed, ","))
 	check("reordered file active", reforge.state(b) == "active", reforge.state(b))
+end
+
+do
+	-- vfx_swapper case: a mod loaded later opens an existing file from its
+	-- on_all_mods_loaded, which DMF runs before the Reforge mod's commit.
+	local world = { stock = STOCK, payload = { ["mods/Alpha/p/aa"] = "h1", ["mods/Alpha/p/new"] = "h2" } }
+	local reforge = fresh(world)
+	local alpha = new_mod("Alpha")
+
+	local a = reforge.register(alpha, { stock = "bundle/aa", file = "p/aa", sha256 = "sha-aa" })
+	local v = reforge.register(alpha, { stock = "bundle/zz", file = "p/new", virtual = true })
+
+	world.dll.opens["bundle/aa"] = 2
+	reforge.commit()
+	check("file opened between registration and commit is active", reforge.state(a) == "active", reforge.state(a))
+	check("virtual file active after commit", reforge.state(v) == "active")
+	check("commit does not push an early file again", #world.dll.adds == 1, #world.dll.adds)
+end
+
+do
+	-- Asset Redirect registers after the Reforge mod but before the commit.
+	local world = { stock = STOCK, payload = { ["mods/Alpha/p/aa"] = "h1" } }
+	local reforge = fresh(world)
+	local alpha = new_mod("Alpha")
+
+	local a = reforge.register(alpha, { stock = "bundle/aa", file = "p/aa", sha256 = "sha-aa" })
+	check("served early before Asset Redirect appears", world.dll.redirects["bundle/aa"] == "mods/Alpha/p/aa")
+	_G.__asset_redirect_instance = { files = { aa = { regs = { { owner = "Polychromatic" } } } } }
+	reforge.commit()
+	check("commit hands the file to Asset Redirect", reforge.state(a) == "displaced" and world.dll.redirects["bundle/aa"] == nil, reforge.state(a))
+	_G.__asset_redirect_instance = nil
+end
+
+do
+	-- An older library registered first; this one takes over before the commit.
+	local world = { stock = STOCK, payload = { ["mods/Old/p/aa"] = "h1", ["mods/New/p/bb"] = "h2" } }
+	fresh(world)
+	local old, new = new_mod("Old"), new_mod("New")
+	local inst = _G.__reforge_instance
+
+	inst.core.register(old, { stock = "bundle/aa", file = "p/aa", sha256 = "sha-aa" })
+	-- Undo the early push so the state matches what library 2 leaves behind.
+	world.dll.redirects = {}
+	inst.files["bundle/aa"].pushed = nil
+	inst.files["bundle/aa"].winner = nil
+	inst.native, inst.native_state, inst.early_tried = nil, "pending", nil
+	inst.core_version = 2
+	inst.carriers[1].version = 2
+
+	local reforge = dofile(LIB)
+	check("takeover waits for its own registration", world.dll.redirects["bundle/aa"] == nil)
+	reforge.register(new, { stock = "bundle/bb", file = "p/bb", sha256 = "sha-bb" })
+	check("takeover serves the older library's files early", world.dll.redirects["bundle/aa"] == "mods/Old/p/aa" and world.dll.redirects["bundle/bb"] == "mods/New/p/bb")
+	local loads = _G.Mods.lua.ffi.loads
+	check("takeover prefers the newest library's dll", loads[#loads] == "../mods/New/bin/reforge.dll", loads[#loads])
 end
 
 print(string.format("\n%d passed, %d failed", passed, failed))

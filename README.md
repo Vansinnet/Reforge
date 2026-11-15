@@ -17,9 +17,13 @@ It has three parts:
 ## How it works
 
 1. DMF loads the mod. The mod's script calls `reforge.register_manifest(...)`.
-2. In `on_all_mods_loaded`, the mod calls `reforge.commit()`. The library loads
-   `bin/reforge.dll` through `Mods.lua.ffi` (LuaJIT FFI) and installs hooks on
-   `CreateFileW`, `CreateFileA` and `CreateFile2`, in this process only.
+   The library loads `bin/reforge.dll` through `Mods.lua.ffi` (LuaJIT FFI),
+   which installs hooks on `CreateFileW`, `CreateFileA` and `CreateFile2`, in
+   this process only, and serves replacements of existing game files at once.
+   DMF runs `on_all_mods_loaded` in reverse load order, so mods loaded later
+   can load packages before any Reforge mod's commit.
+2. In `on_all_mods_loaded`, the mod calls `reforge.commit()`. The library
+   settles which mod wins each file and adds the virtual (new) files.
 3. For every registration, the DLL checks that the stock file still has the
    expected SHA-256. When it does, later read-only opens of that file get a
    handle to the mod's copy. When the game has been patched and the hash no
