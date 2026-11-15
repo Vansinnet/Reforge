@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-11-15)
 
 - Library 3: replacements of existing game files are served from registration, not from `commit()`. DMF runs `on_all_mods_loaded` in reverse load order, so a mod loaded after a Reforge mod could load a package with a replaced file first: with VFX Swapper installed, RainbowFlame's flamer stream bundle needed a restart on every start, and a restart never helped. The DLL now loads at the first registration; a failure there stays quiet and is retried with the next carrier and reported at commit. Virtual files and the final winner of each file are still settled at `commit()`, and a newer library that takes over before the commit serves the older library's registrations with its own first registration.
+- In game (Darktide 1.13.0, VFX Swapper on): after one restart RainbowFlame served 166 of 166 files and RainbowBarrels 1,100 of 1,100, with library 3 taking over from EnemyOverlay's older library (553 files active); the flamer stream bundle was opened twice before the commit and served.
 
 ## 0.1.1 (2026-10-28)
 
